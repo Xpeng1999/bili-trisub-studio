@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -507,6 +508,16 @@ func mergeMultiPart(filepath string, parts []*FilePartMeta) error {
 	return err
 }
 
+func runSubtitlePipeline(videoPath string) {
+	script := filepath.Join(os.Getenv("HOME"), "Desktop", "whisperx_Sub", "run_pipeline.sh")
+	cmd := exec.Command("bash", script, videoPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "[subtitle] pipeline error: %v\n", err)
+	}
+}
+
 func (downloader *Downloader) aria2(title string, stream *extractors.Stream) error {
 	rpcData := Aria2RPCData{
 		JSONRPC: "2.0",
@@ -682,6 +693,7 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 				os.Remove(path)
 			}
 		}
+		go runSubtitlePipeline(mergedFilePath)
 		return nil
 	}
 
@@ -757,5 +769,6 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 		}
 	}
 
+	go runSubtitlePipeline(mergedFilePath)
 	return nil
 }

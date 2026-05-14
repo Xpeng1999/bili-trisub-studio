@@ -94,9 +94,10 @@ if (-not (Test-Path $VenvPython)) {
 Write-Host "Using venv Python: $VenvPython"
 
 Write-Step "Installing Python dependencies"
-Invoke-Checked $VenvPython @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+Invoke-Checked $VenvPython @("-m", "pip", "install", "--upgrade", "pip<26", "setuptools<81", "wheel")
 Invoke-Checked $VenvPython @("-m", "pip", "install", "--only-binary=:all:", "numpy==1.26.4")
 Invoke-Checked $VenvPython @("-m", "pip", "install", "-r", "$Root\whisperx_Sub\requirements.txt")
+Invoke-Checked $VenvPython @("-m", "pip", "install", "--upgrade", "setuptools<81")
 
 Write-Step "Installation complete"
 Write-Host "You can now double-click start.bat, then open http://127.0.0.1:8080 in your browser."

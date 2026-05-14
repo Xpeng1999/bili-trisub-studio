@@ -27,3 +27,4 @@ Notes:
 - Keep this folder intact. The exe, whisperx_Sub, and .venv are expected to stay together.
 - The LLM settings are passed only to the current task as environment variables.
 - If dependency installation fails, install.bat stops with an error instead of reporting success.
+- Re-run install.bat after updates; it repairs dependency versions inside the existing .venv.

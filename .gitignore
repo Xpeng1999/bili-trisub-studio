@@ -14,6 +14,8 @@ coverage.txt
 
 # Python
 *.pyc
+__pycache__/
+.pytest_cache/
 
 .vscode
 .idea
@@ -35,3 +37,13 @@ annie_*
 *.webm
 
 lux
+
+# Vendored subtitle tooling local state
+whisperx_Sub/.git/
+whisperx_Sub/.pytest_cache/
+whisperx_Sub/**/__pycache__/
+whisperx_Sub/temp/
+whisperx_Sub/output/
+whisperx_Sub/.locks/
+whisperx_Sub/.DS_Store
+whisperx_Sub/models--*/.DS_Store

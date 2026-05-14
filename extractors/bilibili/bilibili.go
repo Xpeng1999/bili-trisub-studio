@@ -3,6 +3,8 @@ package bilibili
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -86,6 +88,7 @@ func genAPI(aid, cid, quality int, bvid string, bangumi bool, cookie string) (st
 type bilibiliOptions struct {
 	url      string
 	html     string
+	title    string
 	bangumi  bool
 	aid      int
 	cid      int
@@ -274,6 +277,106 @@ func extractNormalVideo(url, html string, extractOption extractors.Options) ([]*
 	return multiEpisodeDownload(url, html, extractOption, pageData)
 }
 
+func extractNormalVideoByAPI(videoURL string, extractOption extractors.Options) ([]*extractors.Data, error) {
+	view, err := getViewData(videoURL)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	p := pageNumber(videoURL)
+	if len(view.Pages) == 0 {
+		view.Pages = []viewPageData{{Cid: view.Cid, Page: 1, Part: view.Title}}
+	}
+	if len(view.Pages) < p || p < 1 {
+		return nil, errors.WithStack(extractors.ErrURLParseFailed)
+	}
+
+	if !extractOption.Playlist {
+		page := view.Pages[p-1]
+		options := bilibiliOptions{
+			url:   videoURL,
+			title: view.Title,
+			aid:   view.Aid,
+			bvid:  view.BVid,
+			cid:   page.Cid,
+			page:  p,
+		}
+		if page.Part != "Untitled" && len(view.Pages) > 1 {
+			options.subtitle = page.Part
+		}
+		return []*extractors.Data{bilibiliDownload(options, extractOption)}, nil
+	}
+
+	needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(view.Pages))
+	extractedData := make([]*extractors.Data, len(needDownloadItems))
+	wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
+	dataIndex := 0
+	for index, page := range view.Pages {
+		if !slices.Contains(needDownloadItems, index+1) {
+			continue
+		}
+		wgp.Add()
+		options := bilibiliOptions{
+			url:      videoURL,
+			title:    view.Title,
+			aid:      view.Aid,
+			bvid:     view.BVid,
+			cid:      page.Cid,
+			subtitle: page.Part,
+			page:     page.Page,
+		}
+		go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
+			defer wgp.Done()
+			extractedData[index] = bilibiliDownload(options, extractOption)
+		}(dataIndex, options, extractedData)
+		dataIndex++
+	}
+	wgp.Wait()
+	return extractedData, nil
+}
+
+func getViewData(videoURL string) (*viewData, error) {
+	api, err := viewAPI(videoURL)
+	if err != nil {
+		return nil, err
+	}
+	jsonString, err := request.Get(api, referer, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var view viewResponse
+	if err := json.Unmarshal([]byte(jsonString), &view); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	if view.Code != 0 {
+		return nil, errors.Errorf("bilibili view api error: %s", view.Message)
+	}
+	return &view.Data, nil
+}
+
+func viewAPI(videoURL string) (string, error) {
+	if match := regexp.MustCompile(`BV[0-9A-Za-z]+`).FindString(videoURL); match != "" {
+		return fmt.Sprintf("https://api.bilibili.com/x/web-interface/view?bvid=%s", match), nil
+	}
+	if match := regexp.MustCompile(`(?:av|/video/av)(\d+)`).FindStringSubmatch(videoURL); len(match) == 2 {
+		return fmt.Sprintf("https://api.bilibili.com/x/web-interface/view?aid=%s", match[1]), nil
+	}
+	return "", errors.WithStack(extractors.ErrURLParseFailed)
+}
+
+func pageNumber(videoURL string) int {
+	u, err := url.Parse(videoURL)
+	if err != nil {
+		return 1
+	}
+	p, err := strconv.Atoi(u.Query().Get("p"))
+	if err != nil || p < 1 {
+		return 1
+	}
+	return p
+}
+
 // handle multi episode download
 func multiEpisodeDownload(url, html string, extractOption extractors.Options, pageData *multiPage) ([]*extractors.Data, error) {
 	needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(pageData.Sections[0].Episodes))
@@ -345,6 +448,9 @@ func (e *extractor) Extract(url string, option extractors.Options) ([]*extractor
 	var err error
 	html, err := request.Get(url, referer, nil)
 	if err != nil {
+		if strings.Contains(url, "/video/") || strings.Contains(url, "b23.tv") {
+			return extractNormalVideoByAPI(url, option)
+		}
 		return nil, errors.WithStack(err)
 	}
 
@@ -371,7 +477,7 @@ func bilibiliDownload(options bilibiliOptions, extractOption extractors.Options)
 	if options.html != "" {
 		// reuse html string, but this can't be reused in case of playlist
 		html = options.html
-	} else {
+	} else if options.title == "" {
 		html, err = request.Get(options.url, referer, nil)
 		if err != nil {
 			return extractors.EmptyData(options.url, err)
@@ -480,11 +586,14 @@ func bilibiliDownload(options bilibiliOptions, extractOption extractors.Options)
 	}
 
 	// get the title
-	doc, err := parser.GetDoc(html)
-	if err != nil {
-		return extractors.EmptyData(options.url, err)
+	title := options.title
+	if title == "" {
+		doc, err := parser.GetDoc(html)
+		if err != nil {
+			return extractors.EmptyData(options.url, err)
+		}
+		title = parser.Title(doc)
 	}
-	title := parser.Title(doc)
 	if options.subtitle != "" {
 		pageString := ""
 		if options.page > 0 {

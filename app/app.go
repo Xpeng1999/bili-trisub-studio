@@ -30,8 +30,8 @@ func init() {
 		fmt.Fprintf(
 			color.Output,
 			"\n%s: version %s, A fast and simple video downloader.\n\n",
-			cyan.Sprintf(Name),
-			blue.Sprintf(c.App.Version),
+			cyan.Sprintf("%s", Name),
+			blue.Sprintf("%s", c.App.Version),
 		)
 	}
 }
@@ -47,6 +47,15 @@ func New() *cli.App {
 				Name:    "debug",
 				Aliases: []string{"d"},
 				Usage:   "Debug mode",
+			},
+			&cli.BoolFlag{
+				Name:  "web",
+				Usage: "Start the local web interface",
+			},
+			&cli.StringFlag{
+				Name:  "web-addr",
+				Value: "127.0.0.1:8080",
+				Usage: "Address for the local web interface",
 			},
 			&cli.BoolFlag{
 				Name:    "silent",
@@ -123,6 +132,11 @@ func New() *cli.App {
 				Name:    "embed-subtitle",
 				Aliases: []string{"embed"},
 				Usage:   "Embed subtitles into the video (requires ffmpeg)",
+			},
+			&cli.BoolFlag{
+				Name:   "wait-subtitle",
+				Usage:  "Wait until the automatic subtitle pipeline finishes",
+				Hidden: true,
 			},
 
 			&cli.UintFlag{
@@ -209,6 +223,10 @@ func New() *cli.App {
 			},
 		},
 		Action: func(c *cli.Context) error {
+			if c.Bool("web") {
+				return StartWebServer(c.String("web-addr"))
+			}
+
 			args := c.Args().Slice()
 
 			if c.Bool("debug") {
@@ -240,6 +258,9 @@ func New() *cli.App {
 						return err
 					}
 					cookie = strings.TrimSpace(string(data))
+					if strings.HasPrefix(cookie, "# Netscape HTTP Cookie File") {
+						cookie = parseNetscapeCookies(cookie)
+					}
 				}
 			}
 
@@ -317,6 +338,7 @@ func download(c *cli.Context, videoURL string) error {
 		FileNameLength: int(c.Uint("file-name-length")),
 		Caption:        c.Bool("caption"),
 		EmbedSubtitle:  c.Bool("embed-subtitle"),
+		WaitSubtitle:   c.Bool("wait-subtitle"),
 		MultiThread:    c.Bool("multi-thread"),
 		ThreadNumber:   int(c.Uint("thread")),
 		RetryTimes:     int(c.Uint("retry")),
@@ -342,4 +364,20 @@ func download(c *cli.Context, videoURL string) error {
 		return errors[0]
 	}
 	return nil
+}
+
+// parseNetscapeCookies converts a Netscape cookie file to a Cookie header string.
+func parseNetscapeCookies(content string) string {
+	var parts []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || (strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "#HttpOnly_")) {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) >= 7 {
+			parts = append(parts, fields[5]+"="+fields[6])
+		}
+	}
+	return strings.Join(parts, "; ")
 }

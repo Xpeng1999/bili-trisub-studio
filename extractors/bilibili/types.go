@@ -64,6 +64,27 @@ type multiPage struct {
 	VideoData multiPageVideoData `json:"videoData"`
 }
 
+type viewPageData struct {
+	Cid  int    `json:"cid"`
+	Page int    `json:"page"`
+	Part string `json:"part"`
+}
+
+type viewData struct {
+	Aid      int            `json:"aid"`
+	BVid     string         `json:"bvid"`
+	Title    string         `json:"title"`
+	Cid      int            `json:"cid"`
+	Pages    []viewPageData `json:"pages"`
+	Subtitle subtitleInfo   `json:"subtitle"`
+}
+
+type viewResponse struct {
+	Code    int      `json:"code"`
+	Message string   `json:"message"`
+	Data    viewData `json:"data"`
+}
+
 type dashStream struct {
 	ID        int    `json:"id"`
 	BaseURL   string `json:"baseUrl"`

@@ -37,6 +37,7 @@ type Options struct {
 	FileNameLength int
 	Caption        bool
 	EmbedSubtitle  bool
+	WaitSubtitle   bool
 
 	MultiThread  bool
 	ThreadNumber int
@@ -508,14 +509,80 @@ func mergeMultiPart(filepath string, parts []*FilePartMeta) error {
 	return err
 }
 
-func runSubtitlePipeline(videoPath string) {
-	script := filepath.Join(os.Getenv("HOME"), "Desktop", "whisperx_Sub", "run_pipeline.sh")
-	cmd := exec.Command("bash", script, videoPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "[subtitle] pipeline error: %v\n", err)
+func findSubtitleScript() (string, error) {
+	if dir := os.Getenv("LUX_WHISPERX_SUB_DIR"); dir != "" {
+		script := filepath.Join(dir, "run_pipeline.sh")
+		if _, err := os.Stat(script); err == nil {
+			return script, nil
+		}
 	}
+
+	var roots []string
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		roots = append(roots, filepath.Dir(exe))
+	}
+
+	seen := map[string]bool{}
+	for _, root := range roots {
+		for {
+			if root == "" || seen[root] {
+				break
+			}
+			seen[root] = true
+			script := filepath.Join(root, "whisperx_Sub", "run_pipeline.sh")
+			if _, err := os.Stat(script); err == nil {
+				return script, nil
+			}
+			parent := filepath.Dir(root)
+			if parent == root {
+				break
+			}
+			root = parent
+		}
+	}
+
+	return "", errors.New("cannot find whisperx_Sub/run_pipeline.sh; set LUX_WHISPERX_SUB_DIR to the whisperx_Sub directory")
+}
+
+func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
+	script, err := findSubtitleScript()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[subtitle] %v\n", err)
+		return
+	}
+	logPath := videoPath + ".subtitle.log"
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[subtitle] cannot create log file: %v\n", err)
+		return
+	}
+	cmd := exec.Command("bash", script, videoPath, ccSRTPath)
+	if wait {
+		defer logFile.Close()
+		cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
+		cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "[subtitle] pipeline error: %v\n[subtitle] log: %s\n", err, logPath)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "[subtitle] pipeline finished\n[subtitle] log: %s\n", logPath)
+		return
+	}
+
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = backgroundSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "[subtitle] pipeline start error: %v\n", err)
+		logFile.Close()
+		return
+	}
+	logFile.Close()
+	cmd.Process.Release()
+	fmt.Fprintf(os.Stderr, "[subtitle] pipeline running in background\n[subtitle] log: %s\n", logPath)
 }
 
 func (downloader *Downloader) aria2(title string, stream *extractors.Stream) error {
@@ -617,6 +684,17 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 		printStreamInfo(data, stream)
 	}
 
+	// auto-download CC subtitle for pipeline use (always, regardless of -C flag)
+	ccSRTPath := ""
+	if ccPart, ok := data.Captions["subtitle"]; ok && ccPart != nil {
+		ccTitle := title + "_cc"
+		if err := downloader.caption(ccPart.URL, ccTitle, ccPart.Ext, ccPart.Transform); err == nil {
+			if p, e := utils.FilePath(ccTitle, ccPart.Ext, downloader.option.FileNameLength, downloader.option.OutputPath, true); e == nil {
+				ccSRTPath = p
+			}
+		}
+	}
+
 	// download caption
 	var subtitlePaths []string
 	var subtitleLangs []string
@@ -693,7 +771,7 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 				os.Remove(path)
 			}
 		}
-		go runSubtitlePipeline(mergedFilePath)
+		runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle)
 		return nil
 	}
 
@@ -769,6 +847,6 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 		}
 	}
 
-	go runSubtitlePipeline(mergedFilePath)
+	runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle)
 	return nil
 }

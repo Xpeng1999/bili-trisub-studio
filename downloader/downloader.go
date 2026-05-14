@@ -580,7 +580,7 @@ func findSubtitlePython(scriptPath string) string {
 	}
 	candidates = append(candidates, "python3", "python")
 	if runtime.GOOS == "windows" {
-		candidates = append([]string{"py"}, candidates...)
+		candidates = append(candidates, "py")
 	}
 
 	seen := map[string]bool{}
@@ -602,21 +602,23 @@ func findSubtitlePython(scriptPath string) string {
 	return "python"
 }
 
-func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
+func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) error {
 	script, err := findSubtitleScript()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[subtitle] %v\n", err)
-		return
+		return err
 	}
 	logPath := videoPath + ".subtitle.log"
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[subtitle] cannot create log file: %v\n", err)
-		return
+		return err
 	}
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command(findSubtitlePython(script), script, videoPath, ccSRTPath)
+		python := findSubtitlePython(script)
+		fmt.Fprintf(os.Stderr, "[subtitle] using python: %s\n", python)
+		cmd = exec.Command(python, script, videoPath, ccSRTPath)
 	} else {
 		cmd = exec.Command("bash", script, videoPath, ccSRTPath)
 	}
@@ -626,10 +628,10 @@ func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
 		cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "[subtitle] pipeline error: %v\n[subtitle] log: %s\n", err, logPath)
-			return
+			return err
 		}
 		fmt.Fprintf(os.Stderr, "[subtitle] pipeline finished\n[subtitle] log: %s\n", logPath)
-		return
+		return nil
 	}
 
 	cmd.Stdout = logFile
@@ -638,11 +640,12 @@ func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "[subtitle] pipeline start error: %v\n", err)
 		logFile.Close()
-		return
+		return err
 	}
 	logFile.Close()
 	cmd.Process.Release()
 	fmt.Fprintf(os.Stderr, "[subtitle] pipeline running in background\n[subtitle] log: %s\n", logPath)
+	return nil
 }
 
 func (downloader *Downloader) aria2(title string, stream *extractors.Stream) error {
@@ -831,7 +834,9 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 				os.Remove(path)
 			}
 		}
-		runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle)
+		if err := runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle); err != nil && downloader.option.WaitSubtitle {
+			return err
+		}
 		return nil
 	}
 
@@ -907,6 +912,8 @@ func (downloader *Downloader) Download(data *extractors.Data) error {
 		}
 	}
 
-	runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle)
+	if err := runSubtitlePipeline(mergedFilePath, ccSRTPath, downloader.option.WaitSubtitle); err != nil && downloader.option.WaitSubtitle {
+		return err
+	}
 	return nil
 }

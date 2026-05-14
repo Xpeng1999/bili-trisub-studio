@@ -25,6 +25,7 @@ type webJob struct {
 	Platform     string    `json:"platform"`
 	URL          string    `json:"url"`
 	OutputDir    string    `json:"outputDir"`
+	StreamFormat string    `json:"streamFormat,omitempty"`
 	LLMBaseURL   string    `json:"-"`
 	LLMAPIKey    string    `json:"-"`
 	LLMModel     string    `json:"-"`
@@ -109,6 +110,7 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 		Platform   string `json:"platform"`
 		URL        string `json:"url"`
 		OutputDir  string `json:"outputDir"`
+		Quality    string `json:"quality"`
 		LLMBaseURL string `json:"llmBaseUrl"`
 		LLMAPIKey  string `json:"llmApiKey"`
 		LLMModel   string `json:"llmModel"`
@@ -121,6 +123,11 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	platform := strings.TrimSpace(req.Platform)
 	videoURL := strings.TrimSpace(req.URL)
 	outputDir := strings.TrimSpace(req.OutputDir)
+	streamFormat, err := streamFormatFromQuality(req.Quality)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	llmBaseURL := strings.TrimSpace(req.LLMBaseURL)
 	llmAPIKey := strings.TrimSpace(req.LLMAPIKey)
 	llmModel := strings.TrimSpace(req.LLMModel)
@@ -162,17 +169,18 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	jobLogs := []string{"任务已创建", "输出目录: " + childDir}
 
 	job := &webJob{
-		ID:         id,
-		Platform:   platform,
-		URL:        videoURL,
-		OutputDir:  childDir,
-		LLMBaseURL: llmBaseURL,
-		LLMAPIKey:  llmAPIKey,
-		LLMModel:   llmModel,
-		Status:     "running",
-		Progress:   3,
-		StartedAt:  time.Now(),
-		Logs:       jobLogs,
+		ID:           id,
+		Platform:     platform,
+		URL:          videoURL,
+		OutputDir:    childDir,
+		StreamFormat: streamFormat,
+		LLMBaseURL:   llmBaseURL,
+		LLMAPIKey:    llmAPIKey,
+		LLMModel:     llmModel,
+		Status:       "running",
+		Progress:     3,
+		StartedAt:    time.Now(),
+		Logs:         jobLogs,
 	}
 
 	s.mu.Lock()
@@ -232,6 +240,9 @@ func (s *webServer) runJob(job *webJob) {
 		"--silent",
 		"--wait-subtitle",
 		"--output-path", job.OutputDir,
+	}
+	if job.StreamFormat != "" {
+		args = append(args, "--stream-format", job.StreamFormat)
 	}
 	args = append(args, job.URL)
 	cmd := exec.Command(s.exe, args...)
@@ -503,6 +514,23 @@ func platformMatchesURL(platform, videoURL string) bool {
 	return false
 }
 
+func streamFormatFromQuality(quality string) (string, error) {
+	switch strings.TrimSpace(quality) {
+	case "", "auto":
+		return "", nil
+	case "360":
+		return "360P", nil
+	case "480":
+		return "480P", nil
+	case "720":
+		return "720P", nil
+	case "1080":
+		return "1080P", nil
+	default:
+		return "", fmt.Errorf("不支持的视频清晰度: %s", quality)
+	}
+}
+
 func childFolderName(platform, videoURL string) string {
 	id := extractVideoID(videoURL)
 	if id == "" {
@@ -731,6 +759,16 @@ const webIndexHTML = `<!doctype html>
             <option value="bilibili">B站</option>
           </select>
         </div>
+        <div>
+          <label for="quality">视频清晰度</label>
+          <select id="quality">
+            <option value="auto">自动最高</option>
+            <option value="1080">1080P</option>
+            <option value="720">720P</option>
+            <option value="480">480P</option>
+            <option value="360">360P</option>
+          </select>
+        </div>
         <div class="url">
           <label for="url">视频链接</label>
           <input id="url" placeholder="https://www.bilibili.com/video/BV...">
@@ -821,6 +859,7 @@ const webIndexHTML = `<!doctype html>
 
   <script>
     const platform = document.querySelector("#platform");
+    const quality = document.querySelector("#quality");
     const url = document.querySelector("#url");
     const outputDir = document.querySelector("#outputDir");
     const llmBaseUrl = document.querySelector("#llmBaseUrl");
@@ -904,6 +943,7 @@ const webIndexHTML = `<!doctype html>
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             platform: platform.value,
+            quality: quality.value,
             url: url.value,
             outputDir: outputDir.value,
             llmBaseUrl: llmBaseUrl.value,

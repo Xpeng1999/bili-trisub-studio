@@ -35,6 +35,78 @@ const referer = "https://www.bilibili.com"
 
 var utoken string
 
+func dashStreamURLs(stream dashStream) []string {
+	candidates := make([]string, 0, 2+len(stream.BackupURL)+len(stream.BackupURLAlt))
+	add := func(raw string) {
+		if raw != "" && !slices.Contains(candidates, raw) {
+			candidates = append(candidates, raw)
+		}
+	}
+
+	add(stream.BaseURL)
+	add(stream.BaseURLAlt)
+	for _, raw := range stream.BackupURL {
+		add(raw)
+	}
+	for _, raw := range stream.BackupURLAlt {
+		add(raw)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return bilibiliCDNScore(candidates[i]) < bilibiliCDNScore(candidates[j])
+	})
+	return candidates
+}
+
+func bilibiliCDNScore(rawURL string) int {
+	score := 0
+	lower := strings.ToLower(rawURL)
+
+	if strings.Contains(lower, "bilivideo.com") {
+		score -= 20
+	}
+	if strings.Contains(lower, "bili") {
+		score -= 5
+	}
+	if strings.Contains(lower, "mcdn") {
+		score += 100
+	}
+	if strings.Contains(lower, ":4483") || strings.Contains(lower, ":4484") {
+		score += 40
+	}
+	for _, blocked := range []string{"mountaintoys.cn", "szbdyd.com", "xycdn.com"} {
+		if strings.Contains(lower, blocked) {
+			score += 30
+		}
+	}
+
+	if parsed, err := url.Parse(rawURL); err == nil {
+		if parsed.Query().Get("os") == "mcdn" || parsed.Query().Get("mcdnid") != "" {
+			score += 100
+		}
+	}
+	return score
+}
+
+func selectDashPart(stream dashStream, ext string) (*extractors.Part, error) {
+	candidates := dashStreamURLs(stream)
+	if len(candidates) == 0 {
+		return nil, errors.New("bilibili stream has no playable URL")
+	}
+
+	for _, candidate := range candidates {
+		size, err := request.Size(candidate, referer)
+		if err == nil {
+			return &extractors.Part{URL: candidate, Size: size, Ext: ext}, nil
+		}
+	}
+
+	// Some Bilibili CDNs reject HEAD/range size probes or are temporarily slow,
+	// especially mcdn nodes on Windows networks. Keep the task alive and let the
+	// downloader perform the real GET with retries.
+	return &extractors.Part{URL: candidates[0], Size: 0, Ext: ext}, nil
+}
+
 func genAPI(aid, cid, quality int, bvid string, bangumi bool, cookie string) (string, error) {
 	var (
 		err        error
@@ -511,39 +583,29 @@ func bilibiliDownload(options bilibiliOptions, extractOption extractors.Options)
 	var audioPart *extractors.Part
 	if dashData.Streams.Audio != nil {
 		// Get audio part
-		var audioID int
-		audios := map[int]string{}
+		var audioStream dashStream
 		bandwidth := 0
-		for _, stream := range dashData.Streams.Audio {
-			if stream.Bandwidth > bandwidth {
-				audioID = stream.ID
+		for i, stream := range dashData.Streams.Audio {
+			if i == 0 || stream.Bandwidth > bandwidth {
+				audioStream = stream
 				bandwidth = stream.Bandwidth
 			}
-			audios[stream.ID] = stream.BaseURL
 		}
-		s, err := request.Size(audios[audioID], referer)
+		part, err := selectDashPart(audioStream, "m4a")
 		if err != nil {
 			return extractors.EmptyData(options.url, err)
 		}
-		audioPart = &extractors.Part{
-			URL:  audios[audioID],
-			Size: s,
-			Ext:  "m4a",
-		}
+		audioPart = part
 	}
 
 	streams := make(map[string]*extractors.Stream, len(dashData.Quality))
 	for _, stream := range dashData.Streams.Video {
-		s, err := request.Size(stream.BaseURL, referer)
+		videoPart, err := selectDashPart(stream, getExtFromMimeType(stream.MimeType))
 		if err != nil {
 			return extractors.EmptyData(options.url, err)
 		}
 		parts := make([]*extractors.Part, 0, 2)
-		parts = append(parts, &extractors.Part{
-			URL:  stream.BaseURL,
-			Size: s,
-			Ext:  getExtFromMimeType(stream.MimeType),
-		})
+		parts = append(parts, videoPart)
 		if audioPart != nil {
 			parts = append(parts, audioPart)
 		}

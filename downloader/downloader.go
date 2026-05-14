@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -510,8 +511,12 @@ func mergeMultiPart(filepath string, parts []*FilePartMeta) error {
 }
 
 func findSubtitleScript() (string, error) {
+	scriptName := "run_pipeline.sh"
+	if runtime.GOOS == "windows" {
+		scriptName = "subtitle_pipeline.py"
+	}
 	if dir := os.Getenv("LUX_WHISPERX_SUB_DIR"); dir != "" {
-		script := filepath.Join(dir, "run_pipeline.sh")
+		script := filepath.Join(dir, scriptName)
 		if _, err := os.Stat(script); err == nil {
 			return script, nil
 		}
@@ -532,7 +537,7 @@ func findSubtitleScript() (string, error) {
 				break
 			}
 			seen[root] = true
-			script := filepath.Join(root, "whisperx_Sub", "run_pipeline.sh")
+			script := filepath.Join(root, "whisperx_Sub", scriptName)
 			if _, err := os.Stat(script); err == nil {
 				return script, nil
 			}
@@ -544,7 +549,57 @@ func findSubtitleScript() (string, error) {
 		}
 	}
 
-	return "", errors.New("cannot find whisperx_Sub/run_pipeline.sh; set LUX_WHISPERX_SUB_DIR to the whisperx_Sub directory")
+	return "", errors.Errorf("cannot find whisperx_Sub/%s; set LUX_WHISPERX_SUB_DIR to the whisperx_Sub directory", scriptName)
+}
+
+func findSubtitlePython(scriptPath string) string {
+	roots := []string{filepath.Dir(scriptPath), filepath.Dir(filepath.Dir(scriptPath))}
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		roots = append(roots, filepath.Dir(exe))
+	}
+
+	candidates := []string{}
+	for _, root := range roots {
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates,
+				filepath.Join(root, ".venv", "Scripts", "python.exe"),
+				filepath.Join(root, "venv", "Scripts", "python.exe"),
+			)
+		} else {
+			candidates = append(candidates,
+				filepath.Join(root, ".venv", "bin", "python"),
+				filepath.Join(root, "venv", "bin", "python"),
+			)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && runtime.GOOS != "windows" {
+		candidates = append(candidates, filepath.Join(home, "miniconda3", "envs", "whisperx_env", "bin", "python"))
+	}
+	candidates = append(candidates, "python3", "python")
+	if runtime.GOOS == "windows" {
+		candidates = append([]string{"py"}, candidates...)
+	}
+
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if strings.Contains(candidate, string(filepath.Separator)) {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
+		}
+	}
+	return "python"
 }
 
 func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
@@ -559,7 +614,12 @@ func runSubtitlePipeline(videoPath, ccSRTPath string, wait bool) {
 		fmt.Fprintf(os.Stderr, "[subtitle] cannot create log file: %v\n", err)
 		return
 	}
-	cmd := exec.Command("bash", script, videoPath, ccSRTPath)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command(findSubtitlePython(script), script, videoPath, ccSRTPath)
+	} else {
+		cmd = exec.Command("bash", script, videoPath, ccSRTPath)
+	}
 	if wait {
 		defer logFile.Close()
 		cmd.Stdout = io.MultiWriter(os.Stdout, logFile)

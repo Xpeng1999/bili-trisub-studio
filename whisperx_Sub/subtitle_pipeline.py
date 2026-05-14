@@ -9,7 +9,7 @@ and the CC subtitle is used directly as the Chinese source.
 
 Writes alongside the video:
   <stem>_zh.srt      Chinese transcription (or CC subtitle copy)
-  <stem>_en.srt      English translation  (skipped if DEEPSEEK_API_KEY unset)
+  <stem>_en.srt      English translation  (requires LUX_LLM_* env vars)
   <stem>_pinyin.srt  Chinese + pinyin bilingual
 """
 
@@ -29,9 +29,6 @@ from srt_util import srt_reader, srt_writer
 from pinyin_processor import generate_pinyin_srt
 from tri_align import build_from_zh, finalize as finalize_tri_subtitles
 
-WHISPERX_BIN = Path(sys.executable).parent / "whisperx"
-
-
 def _local_whisper_model() -> str:
     configured = getattr(config, "whisper_model", "large-v2")
     configured_path = Path(str(configured)).expanduser()
@@ -50,16 +47,6 @@ def _local_whisper_model() -> str:
 
 def _log(msg: str) -> None:
     print(f"[subtitle] {msg}", file=sys.stderr, flush=True)
-
-
-def _read_key_from_zshrc(key_name: str) -> str:
-    import re
-    zshrc = Path.home() / ".zshrc"
-    if not zshrc.exists():
-        return ""
-    text = zshrc.read_text(errors="ignore")
-    m = re.search(rf'{key_name}=["\']([^"\']+)["\']', text)
-    return m.group(1) if m else ""
 
 
 def _translate_zh_to_en(zh_srt: Path, en_srt: Path, api_key: str) -> None:
@@ -156,7 +143,7 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
         _log(f"No CC subtitle, transcribing {video.name} via WhisperX ...")
         with tempfile.TemporaryDirectory() as tmpdir:
             cmd = [
-                str(WHISPERX_BIN), str(video),
+                sys.executable, "-m", "whisperx.transcribe", str(video),
                 "--language", "zh",
                 "--model", _local_whisper_model(),
                 "--device", "cpu",
@@ -188,12 +175,17 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
     except Exception as e:
         _log(f"ERROR during Chinese resegmentation: {e}")
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY") or config.api_key or _read_key_from_zshrc("DEEPSEEK_API_KEY")
+    api_key = os.environ.get("LUX_LLM_API_KEY") or config.api_key
+    base_url = os.environ.get("LUX_LLM_BASE_URL") or config.base_url
+    model_name = os.environ.get("LUX_LLM_MODEL") or config.translation_model_name
+    config.base_url = base_url
+    config.translation_model_name = model_name
     en_srt = out_dir / f"{stem}_en.srt"
-    if not api_key:
-        _log("WARN: DEEPSEEK_API_KEY not set — skipping English translation")
+    if not api_key or not base_url or not model_name:
+        _log("ERROR: missing LLM settings; please provide API URL, API Key, and model name in the web UI")
+        return
     else:
-        _log("Translating to English via DeepSeek ...")
+        _log(f"Translating to English via configured LLM model: {model_name} ...")
         try:
             _translate_zh_to_en(zh_srt, en_srt, api_key)
             _log(f"English SRT: {en_srt}")

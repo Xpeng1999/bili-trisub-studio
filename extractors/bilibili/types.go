@@ -86,12 +86,15 @@ type viewResponse struct {
 }
 
 type dashStream struct {
-	ID        int    `json:"id"`
-	BaseURL   string `json:"baseUrl"`
-	Bandwidth int    `json:"bandwidth"`
-	MimeType  string `json:"mimeType"`
-	Codecid   int    `json:"codecid"`
-	Codecs    string `json:"codecs"`
+	ID           int      `json:"id"`
+	BaseURL      string   `json:"baseUrl"`
+	BaseURLAlt   string   `json:"base_url"`
+	BackupURL    []string `json:"backupUrl"`
+	BackupURLAlt []string `json:"backup_url"`
+	Bandwidth    int      `json:"bandwidth"`
+	MimeType     string   `json:"mimeType"`
+	Codecid      int      `json:"codecid"`
+	Codecs       string   `json:"codecs"`
 }
 
 type dashStreams struct {

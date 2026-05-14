@@ -42,15 +42,25 @@ http://127.0.0.1:8080/
 
 Each task creates a subfolder under the selected output directory, keeping the video, subtitles, and trilingual JSON together.
 
-## Windows Executable
+## Windows One-Click Package
 
-Build a Windows executable with:
+Distribute the complete Windows package instead of the standalone exe. The package contains:
+
+- `bili-trisub-studio.exe`
+- `whisperx_Sub/`
+- `install.bat`
+- `start.bat`
+- `README-Windows.txt`
+
+On first use, users run `install.bat` to create the local `.venv` and install subtitle dependencies. After that, they run `start.bat` to open the web UI.
+
+Build the Windows executable with the command below, then package it with the scripts under `packaging/windows/`:
 
 ```bash
 GOOS=windows GOARCH=amd64 go build -o dist/bili-trisub-studio-windows-amd64.exe .
 ```
 
-Note: the executable contains the Go application. The subtitle pipeline still requires Python, FFmpeg, and the Python dependencies listed in `whisperx_Sub/requirements.txt`.
+Note: the executable contains the Go application only. The subtitle pipeline still requires Python, FFmpeg, and the Python dependencies listed in `whisperx_Sub/requirements.txt`. Users must provide their own LLM API URL, model name, and API key in the web UI; this project does not ship with a default LLM provider.
 
 ## GitHub References and Licenses
 

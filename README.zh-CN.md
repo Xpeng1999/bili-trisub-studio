@@ -44,15 +44,25 @@ http://127.0.0.1:8080/
 
 每个任务都会在你选择的目录下创建一个子文件夹，视频、字幕和三语 JSON 都会放在里面。
 
-## Windows 可执行文件
+## Windows 一键包
 
-可以用下面的命令生成 Windows 版 exe：
+推荐分发完整 Windows 包，而不是单独分发 exe。完整包包含：
+
+- `bili-trisub-studio.exe`
+- `whisperx_Sub/`
+- `install.bat`
+- `start.bat`
+- `README-Windows.txt`
+
+用户第一次使用时先双击 `install.bat`，它会创建本地 `.venv` 并安装字幕依赖；之后双击 `start.bat` 启动网页界面。
+
+可以用下面的命令生成 Windows 版 exe，再配合 `packaging/windows/` 下的脚本打包：
 
 ```bash
 GOOS=windows GOARCH=amd64 go build -o dist/bili-trisub-studio-windows-amd64.exe .
 ```
 
-注意：exe 只包含 Go 程序本体。字幕生成仍然依赖 Python 环境、FFmpeg，以及 `whisperx_Sub/requirements.txt` 中的 Python 依赖。
+注意：exe 只包含 Go 程序本体。字幕生成仍然依赖 Python 环境、FFmpeg，以及 `whisperx_Sub/requirements.txt` 中的 Python 依赖。网页中必须由用户自行填写大模型 API 地址、模型名称和 API Key；项目不内置默认大模型服务商信息。
 
 ## 引用的开源项目与 License
 

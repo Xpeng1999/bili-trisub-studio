@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,9 @@ type webJob struct {
 	Platform     string    `json:"platform"`
 	URL          string    `json:"url"`
 	OutputDir    string    `json:"outputDir"`
+	LLMBaseURL   string    `json:"-"`
+	LLMAPIKey    string    `json:"-"`
+	LLMModel     string    `json:"-"`
 	Status       string    `json:"status"`
 	Progress     int       `json:"progress"`
 	Logs         []string  `json:"logs"`
@@ -102,9 +106,12 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Platform  string `json:"platform"`
-		URL       string `json:"url"`
-		OutputDir string `json:"outputDir"`
+		Platform   string `json:"platform"`
+		URL        string `json:"url"`
+		OutputDir  string `json:"outputDir"`
+		LLMBaseURL string `json:"llmBaseUrl"`
+		LLMAPIKey  string `json:"llmApiKey"`
+		LLMModel   string `json:"llmModel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -114,6 +121,9 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	platform := strings.TrimSpace(req.Platform)
 	videoURL := strings.TrimSpace(req.URL)
 	outputDir := strings.TrimSpace(req.OutputDir)
+	llmBaseURL := strings.TrimSpace(req.LLMBaseURL)
+	llmAPIKey := strings.TrimSpace(req.LLMAPIKey)
+	llmModel := strings.TrimSpace(req.LLMModel)
 	if platform != "bilibili" {
 		http.Error(w, "当前版本仅支持 B站 视频", http.StatusBadRequest)
 		return
@@ -128,6 +138,14 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if outputDir == "" {
 		outputDir = defaultDownloadDir()
+	}
+	if llmBaseURL == "" || llmAPIKey == "" || llmModel == "" {
+		http.Error(w, "请填写大模型 API 地址、API Key 和模型名称", http.StatusBadRequest)
+		return
+	}
+	if parsed, err := neturl.ParseRequestURI(llmBaseURL); err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		http.Error(w, "大模型 API 地址格式不正确", http.StatusBadRequest)
+		return
 	}
 	info, err := os.Stat(outputDir)
 	if err != nil || !info.IsDir() {
@@ -144,14 +162,17 @@ func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
 	jobLogs := []string{"任务已创建", "输出目录: " + childDir}
 
 	job := &webJob{
-		ID:        id,
-		Platform:  platform,
-		URL:       videoURL,
-		OutputDir: childDir,
-		Status:    "running",
-		Progress:  3,
-		StartedAt: time.Now(),
-		Logs:      jobLogs,
+		ID:         id,
+		Platform:   platform,
+		URL:        videoURL,
+		OutputDir:  childDir,
+		LLMBaseURL: llmBaseURL,
+		LLMAPIKey:  llmAPIKey,
+		LLMModel:   llmModel,
+		Status:     "running",
+		Progress:   3,
+		StartedAt:  time.Now(),
+		Logs:       jobLogs,
 	}
 
 	s.mu.Lock()
@@ -215,7 +236,12 @@ func (s *webServer) runJob(job *webJob) {
 	args = append(args, job.URL)
 	cmd := exec.Command(s.exe, args...)
 	cmd.Dir = s.cwd
-	cmd.Env = append(os.Environ(), "LUX_WHISPERX_SUB_DIR="+filepath.Join(s.cwd, "whisperx_Sub"))
+	cmd.Env = append(os.Environ(),
+		"LUX_WHISPERX_SUB_DIR="+filepath.Join(s.cwd, "whisperx_Sub"),
+		"LUX_LLM_BASE_URL="+job.LLMBaseURL,
+		"LUX_LLM_API_KEY="+job.LLMAPIKey,
+		"LUX_LLM_MODEL="+job.LLMModel,
+	)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -356,10 +382,7 @@ func (s *webServer) normalizeSegments(segments []triSegment) ([]triSegment, erro
 
 func (s *webServer) runTriEdit(command string, payload any, response any) error {
 	script := filepath.Join(s.cwd, "whisperx_Sub", "tri_edit.py")
-	python := filepath.Join(os.Getenv("HOME"), "miniconda3", "envs", "whisperx_env", "bin", "python")
-	if _, err := os.Stat(python); err != nil {
-		python = "python3"
-	}
+	python := findWebPython(s.cwd)
 	cmd := exec.Command(python, script, command)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -384,6 +407,40 @@ func (s *webServer) runTriEdit(command string, payload any, response any) error 
 		return err
 	}
 	return nil
+}
+
+func findWebPython(root string) string {
+	candidates := []string{}
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates,
+			filepath.Join(root, ".venv", "Scripts", "python.exe"),
+			filepath.Join(root, "venv", "Scripts", "python.exe"),
+			"py",
+			"python",
+		)
+	} else {
+		if home, err := os.UserHomeDir(); err == nil {
+			candidates = append(candidates, filepath.Join(home, "miniconda3", "envs", "whisperx_env", "bin", "python"))
+		}
+		candidates = append(candidates,
+			filepath.Join(root, ".venv", "bin", "python"),
+			filepath.Join(root, "venv", "bin", "python"),
+			"python3",
+			"python",
+		)
+	}
+	for _, candidate := range candidates {
+		if strings.Contains(candidate, string(filepath.Separator)) {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
+		}
+	}
+	return "python"
 }
 
 func (s *webServer) scanJobOutput(job *webJob, r io.Reader, wg *sync.WaitGroup) {
@@ -617,6 +674,7 @@ const webIndexHTML = `<!doctype html>
     label { display:block; font-size:13px; font-weight:720; margin-bottom:7px; color:#354052; }
     select, input { width:100%; height:42px; border:1px solid #cbd3df; border-radius:6px; padding:0 12px; font-size:15px; background:white; color:var(--ink); }
     .url { grid-column:1 / -1; }
+    .llm { grid-column:1 / -1; display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:12px; }
     .dir { grid-column:1 / -1; display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; }
     button { height:42px; border:0; border-radius:6px; padding:0 15px; font-size:14px; font-weight:760; cursor:pointer; color:white; background:var(--accent); }
     button.secondary { color:#222a35; background:#e4e8ee; }
@@ -658,7 +716,7 @@ const webIndexHTML = `<!doctype html>
     .dirs { padding:10px 16px; max-height:420px; overflow:auto; }
     .dir-row { width:100%; height:38px; margin:3px 0; display:flex; align-items:center; border:1px solid transparent; background:white; color:var(--ink); text-align:left; font-weight:650; }
     .dir-row:hover { border-color:#cbd5e1; background:#f8fafc; }
-    @media (max-width:820px) { .form { grid-template-columns:1fr; } .dir { grid-template-columns:1fr; } .actions { align-items:stretch; flex-direction:column; } button { width:100%; } .controls { grid-template-columns:repeat(2, 1fr); } button.icon { width:48px; height:48px; } .subtitle-card { padding:18px; } .subtitle-tools { align-items:flex-start; flex-direction:column; } }
+    @media (max-width:820px) { .form { grid-template-columns:1fr; } .llm { grid-template-columns:1fr; } .dir { grid-template-columns:1fr; } .actions { align-items:stretch; flex-direction:column; } button { width:100%; } .controls { grid-template-columns:repeat(2, 1fr); } button.icon { width:48px; height:48px; } .subtitle-card { padding:18px; } .subtitle-tools { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
 <body>
@@ -676,6 +734,20 @@ const webIndexHTML = `<!doctype html>
         <div class="url">
           <label for="url">视频链接</label>
           <input id="url" placeholder="https://www.bilibili.com/video/BV...">
+        </div>
+        <div class="llm">
+          <div>
+            <label for="llmBaseUrl">大模型 API 地址</label>
+            <input id="llmBaseUrl" placeholder="https://api.example.com/v1">
+          </div>
+          <div>
+            <label for="llmModel">模型名称</label>
+            <input id="llmModel" placeholder="填写服务商提供的模型名称">
+          </div>
+          <div>
+            <label for="llmApiKey">API Key</label>
+            <input id="llmApiKey" type="password" autocomplete="off" placeholder="sk-...">
+          </div>
         </div>
         <div class="dir">
           <div>
@@ -751,6 +823,9 @@ const webIndexHTML = `<!doctype html>
     const platform = document.querySelector("#platform");
     const url = document.querySelector("#url");
     const outputDir = document.querySelector("#outputDir");
+    const llmBaseUrl = document.querySelector("#llmBaseUrl");
+    const llmModel = document.querySelector("#llmModel");
+    const llmApiKey = document.querySelector("#llmApiKey");
     const start = document.querySelector("#start");
     const fill = document.querySelector("#fill");
     const state = document.querySelector("#state");
@@ -814,6 +889,11 @@ const webIndexHTML = `<!doctype html>
     };
 
     start.onclick = async () => {
+      if (!llmBaseUrl.value.trim() || !llmModel.value.trim() || !llmApiKey.value.trim()) {
+        state.textContent = "参数不完整";
+        logs.textContent = "请先填写大模型 API 地址、模型名称和 API Key。";
+        return;
+      }
       start.disabled = true;
       logs.textContent = "任务提交中...";
       state.textContent = "运行中";
@@ -822,7 +902,14 @@ const webIndexHTML = `<!doctype html>
         const job = await api("/api/jobs", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ platform: platform.value, url: url.value, outputDir: outputDir.value })
+          body: JSON.stringify({
+            platform: platform.value,
+            url: url.value,
+            outputDir: outputDir.value,
+            llmBaseUrl: llmBaseUrl.value,
+            llmModel: llmModel.value,
+            llmApiKey: llmApiKey.value
+          })
         });
         poll(job.id);
       } catch (e) {

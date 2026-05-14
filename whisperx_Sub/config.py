@@ -13,9 +13,9 @@ audio_file = ""
 
 # subtitle translation parameters
 is_using_local_model = False
-base_url = "https://api.deepseek.com/v1"
-api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-translation_model_name = "deepseek-chat"
+base_url = os.environ.get("LUX_LLM_BASE_URL", "")
+api_key = os.environ.get("LUX_LLM_API_KEY", "")
+translation_model_name = os.environ.get("LUX_LLM_MODEL", "")
 translation_prompt = ""
 srt_file_name = ""
 

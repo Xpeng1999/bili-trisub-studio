@@ -7,7 +7,8 @@ How to use:
 
 2. Double-click install.bat.
    It creates a local .venv environment and installs the subtitle dependencies.
-   If Python or FFmpeg is missing, the installer will try to install them with winget.
+   The installer requires Python 3.11. If Python 3.11 or FFmpeg is missing,
+   it will try to install them with winget.
 
 3. Double-click start.bat.
    The app opens http://127.0.0.1:8080.
@@ -25,3 +26,4 @@ Notes:
 - The first subtitle run may download model files and can take a long time.
 - Keep this folder intact. The exe, whisperx_Sub, and .venv are expected to stay together.
 - The LLM settings are passed only to the current task as environment variables.
+- If dependency installation fails, install.bat stops with an error instead of reporting success.

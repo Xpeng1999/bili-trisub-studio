@@ -19,8 +19,10 @@ translation_model_name = os.environ.get("LUX_LLM_MODEL", "")
 translation_prompt = ""
 srt_file_name = ""
 
-# whisper model: "small"/"medium"/"large-v2" (large-v2 best for Chinese)
-whisper_model = "large-v2"
+# whisper model: "small"/"medium"/"large-v2" or a local model directory.
+# The Windows installer preloads "small" because large-v2 is too large for a
+# normal GitHub release package. Advanced users can override with LUX_WHISPER_MODEL.
+whisper_model = os.environ.get("LUX_WHISPER_MODEL", "small")
 
 # rePunctuation parameters
 WORDS_NUM_LIMITS = 12

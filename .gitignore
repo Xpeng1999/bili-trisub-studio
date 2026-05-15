@@ -48,3 +48,5 @@ whisperx_Sub/output/
 whisperx_Sub/.locks/
 whisperx_Sub/.DS_Store
 whisperx_Sub/models--*/.DS_Store
+whisperx_Sub/models--*/
+whisperx_Sub/models/

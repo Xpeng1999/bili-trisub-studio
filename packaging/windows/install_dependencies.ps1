@@ -101,6 +101,12 @@ Invoke-Checked $VenvPython @("-m", "pip", "install", "--upgrade", "setuptools<81
 $env:PYTHONPATH = "$Root\whisperx_Sub"
 Invoke-Checked $VenvPython @("-c", "import numpy, pypinyin, ctranslate2, openai, whisperx.transcribe; print('Python dependency check passed')")
 
+Write-Step "Downloading default Whisper model"
+$env:HF_ENDPOINT = "https://hf-mirror.com"
+$env:HF_HUB_OFFLINE = "0"
+$env:TRANSFORMERS_OFFLINE = "0"
+Invoke-Checked $VenvPython @("-c", "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8', download_root=r'$Root\whisperx_Sub\models'); print('Whisper model ready')")
+
 Write-Step "Installation complete"
 Write-Host "You can now double-click start.bat, then open http://127.0.0.1:8080 in your browser."
 Read-Host "Press Enter to exit"

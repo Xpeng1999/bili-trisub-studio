@@ -35,14 +35,28 @@ def _local_whisper_model() -> str:
     if configured_path.exists():
         return str(configured_path.resolve())
 
+    model_dir = SCRIPT_DIR / "models" / str(configured)
+    if _valid_faster_whisper_model(model_dir):
+        return str(model_dir.resolve())
+
     model_cache = SCRIPT_DIR / "models--Systran--faster-whisper-large-v2"
     snapshot_root = model_cache / "snapshots"
     if snapshot_root.exists():
         for snapshot in sorted(snapshot_root.iterdir()):
-            if (snapshot / "model.bin").exists() and (snapshot / "config.json").exists():
+            if _valid_faster_whisper_model(snapshot):
                 return str(snapshot.resolve())
 
     return str(configured)
+
+
+def _valid_faster_whisper_model(path: Path) -> bool:
+    model_file = path / "model.bin"
+    config_file = path / "config.json"
+    return (
+        model_file.exists()
+        and config_file.exists()
+        and model_file.stat().st_size > 10 * 1024 * 1024
+    )
 
 
 def _log(msg: str) -> None:
@@ -148,6 +162,7 @@ def run(video_path: str, cc_srt_path: str = "") -> int:
                 sys.executable, "-m", "whisperx.transcribe", str(video),
                 "--language", "zh",
                 "--model", _local_whisper_model(),
+                "--model_dir", str(SCRIPT_DIR / "models"),
                 "--device", "cpu",
                 "--compute_type", "int8",
                 "--output_format", "srt",
@@ -160,6 +175,8 @@ def run(video_path: str, cc_srt_path: str = "") -> int:
             env = {
                 **os.environ,
                 "HF_ENDPOINT": "https://hf-mirror.com",
+                "HF_HUB_OFFLINE": "0",
+                "TRANSFORMERS_OFFLINE": "0",
                 "PYTHONPATH": python_path,
             }
             result = subprocess.run(cmd, capture_output=True, text=True, env=env)

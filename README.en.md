@@ -17,7 +17,45 @@ Bili Tri-Sub Studio downloads Bilibili videos and generates trilingual subtitles
 
 Douyin support has been removed because current anti-bot behavior is not reliable with exported cookies alone.
 
-## Quick Start
+## Recommended Setup
+
+This project is currently distributed as source code only. GitHub Releases and Windows one-click packages are intentionally not provided because the subtitle pipeline depends on Python, FFmpeg, and Whisper model files. The model files are large, and download reliability depends heavily on whether the user's machine can access HuggingFace or a mirror.
+
+Clone the project:
+
+```bash
+git clone https://github.com/Xpeng1999/bili-trisub-studio.git
+cd bili-trisub-studio
+```
+
+Install Go, Python 3.10/3.11, and FFmpeg first. Then create a Python environment and install subtitle dependencies:
+
+```bash
+python -m venv .venv
+
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+# .\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade "pip<26" "setuptools<81" wheel
+python -m pip install -r whisperx_Sub/requirements.txt
+```
+
+Prepare the Whisper model. The default model is `small`; `faster-whisper` will download it on first use if the machine can access HuggingFace or the configured mirror. For unstable networks, download a faster-whisper model manually and set:
+
+```bash
+export LUX_WHISPER_MODEL=/absolute/path/to/faster-whisper-model
+```
+
+Windows PowerShell:
+
+```powershell
+$env:LUX_WHISPER_MODEL="C:\path\to\faster-whisper-model"
+```
+
+Start the local web UI:
 
 ```bash
 go run . --web --web-addr 127.0.0.1:8080
@@ -42,17 +80,25 @@ http://127.0.0.1:8080/
 
 Each task creates a subfolder under the selected output directory, keeping the video, subtitles, and trilingual JSON together.
 
-## Windows One-Click Package
+## LLM Settings
 
-Distribute the complete Windows package instead of the standalone exe. The package contains:
+The web UI requires your own LLM API URL, model name, and API key for Chinese-to-English subtitle translation. The public repository does not include a default provider or private key.
 
-- `bili-trisub-studio.exe`
-- `whisperx_Sub/`
-- `install.bat`
-- `start.bat`
-- `README-Windows.txt`
+For local development only, you can create an ignored `local_llm_config.json` file in the repository root:
 
-On first use, users run `install.bat` to create the local `.venv` and install subtitle dependencies. After that, they run `start.bat` to open the web UI.
+```json
+{
+  "baseUrl": "https://your-llm-api.example.com",
+  "model": "your-model-name",
+  "apiKey": "your-api-key"
+}
+```
+
+This file is listed in `.gitignore` and must not be committed.
+
+## Windows Notes
+
+Windows users should follow the source-code workflow above instead of downloading a release zip. Install Python 3.11, FFmpeg, and Go, then run the same setup commands in PowerShell. If model download fails, manually download a faster-whisper model and set `LUX_WHISPER_MODEL` to that local model directory.
 
 Build the Windows executable with the command below, then package it with the scripts under `packaging/windows/`:
 
@@ -60,7 +106,7 @@ Build the Windows executable with the command below, then package it with the sc
 GOOS=windows GOARCH=amd64 go build -o dist/bili-trisub-studio-windows-amd64.exe .
 ```
 
-Note: the executable contains the Go application only. The subtitle pipeline still requires Python, FFmpeg, and the Python dependencies listed in `whisperx_Sub/requirements.txt`. Users must provide their own LLM API URL, model name, and API key in the web UI; this project does not ship with a default LLM provider.
+Note: the executable contains the Go application only. It is not a complete product package. Subtitle generation still requires Python dependencies, FFmpeg, and Whisper model files.
 
 ## GitHub References and Licenses
 

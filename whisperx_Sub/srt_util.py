@@ -1,6 +1,5 @@
 import os
 import re
-from whisperx.utils import (get_writer)
 import nltk
 from typing import Union
 import math
@@ -47,6 +46,8 @@ def srt_writer(translation_result: list, output_path: str):
 
 def convert_vector_to_Sub(transcribe_result: dict, audio_path, output_format: str, output_dir: str,
                           align_language: str):
+    from whisperx.utils import get_writer
+
     writer = get_writer(output_format, output_dir)
 
     writer_args = {"highlight_words": False, "max_line_count": None, "max_line_width": None}

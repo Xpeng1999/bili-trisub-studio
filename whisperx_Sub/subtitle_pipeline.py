@@ -123,21 +123,23 @@ def _translate_one(client, text: str) -> str:
     return line
 
 
-def run(video_path: str, cc_srt_path: str = "") -> None:
+def run(video_path: str, cc_srt_path: str = "") -> int:
     video = Path(video_path).resolve()
     if not video.exists():
         _log(f"ERROR: file not found: {video}")
-        return
+        return 1
 
     stem = video.stem
     out_dir = video.parent
     zh_srt = out_dir / f"{stem}_zh.srt"
+    exit_code = 0
 
     # ── Step 1: Chinese SRT — use CC subtitle or transcribe via WhisperX ────
     cc = Path(cc_srt_path) if cc_srt_path else None
     if cc and cc.exists() and cc.stat().st_size > 0:
         _log(f"CC subtitle detected, skipping WhisperX transcription")
-        shutil.copy(cc, zh_srt)
+        if cc.resolve() != zh_srt.resolve():
+            shutil.copy(cc, zh_srt)
         _log(f"Chinese SRT (from CC): {zh_srt}")
     else:
         _log(f"No CC subtitle, transcribing {video.name} via WhisperX ...")
@@ -156,12 +158,12 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
             result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             if result.returncode != 0:
                 _log(f"ERROR during transcription:\n{result.stderr[-500:]}")
-                return
+                return 1
 
             srt_candidates = list(Path(tmpdir).glob("*.srt"))
             if not srt_candidates:
                 _log("ERROR: whisperx produced no SRT file")
-                return
+                return 1
 
             shutil.copy(srt_candidates[0], zh_srt)
 
@@ -174,6 +176,7 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
         _log(f"Aligned Chinese SRT: {zh_srt}")
     except Exception as e:
         _log(f"ERROR during Chinese resegmentation: {e}")
+        return 1
 
     api_key = os.environ.get("LUX_LLM_API_KEY") or config.api_key
     base_url = os.environ.get("LUX_LLM_BASE_URL") or config.base_url
@@ -181,16 +184,19 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
     config.base_url = base_url
     config.translation_model_name = model_name
     en_srt = out_dir / f"{stem}_en.srt"
+    english_ready = False
     if not api_key or not base_url or not model_name:
-        _log("ERROR: missing LLM settings; please provide API URL, API Key, and model name in the web UI")
-        return
+        _log("WARN: missing LLM settings; English subtitles will be empty until API URL, API Key, and model name are provided in the web UI")
+        exit_code = 1
     else:
         _log(f"Translating to English via configured LLM model: {model_name} ...")
         try:
             _translate_zh_to_en(zh_srt, en_srt, api_key)
+            english_ready = True
             _log(f"English SRT: {en_srt}")
         except Exception as e:
             _log(f"ERROR during translation: {e}")
+            exit_code = 1
 
     # ── Step 3: Generate pinyin SRT ─────────────────────────────────────────
     _log("Generating pinyin SRT ...")
@@ -200,14 +206,18 @@ def run(video_path: str, cc_srt_path: str = "") -> None:
         _log(f"Pinyin SRT: {pinyin_srt}")
     except Exception as e:
         _log(f"ERROR during pinyin generation: {e}")
+        exit_code = 1
 
     # ── Step 4: Build front-end friendly tri-language JSON ─────────────────
     _log("Building tri-language preview data ...")
     try:
-        tri_json = finalize_tri_subtitles(str(video), str(zh_srt), str(en_srt) if en_srt.exists() else "")
+        tri_json = finalize_tri_subtitles(str(video), str(zh_srt), str(en_srt) if english_ready else "")
         _log(f"Tri-language JSON: {tri_json}")
     except Exception as e:
         _log(f"ERROR during tri-language alignment: {e}")
+        exit_code = 1
+
+    return exit_code
 
 
 if __name__ == "__main__":
@@ -215,4 +225,4 @@ if __name__ == "__main__":
         print("Usage: subtitle_pipeline.py <video_path> [cc_srt_path]", file=sys.stderr)
         sys.exit(1)
     cc = sys.argv[2] if len(sys.argv) >= 3 else ""
-    run(sys.argv[1], cc)
+    sys.exit(run(sys.argv[1], cc))

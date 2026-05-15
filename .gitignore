@@ -37,6 +37,7 @@ annie_*
 *.webm
 
 lux
+local_llm_config.json
 
 # Vendored subtitle tooling local state
 whisperx_Sub/.git/

@@ -61,6 +61,12 @@ type webServer struct {
 	exe  string
 }
 
+type localLLMDefaults struct {
+	BaseURL string `json:"baseUrl"`
+	Model   string `json:"model"`
+	APIKey  string `json:"apiKey"`
+}
+
 // StartWebServer starts the local browser interface.
 func StartWebServer(addr string) error {
 	wd, err := os.Getwd()
@@ -97,7 +103,25 @@ func (s *webServer) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, webIndexHTML)
+	defaultsJSON, _ := json.Marshal(s.loadLocalLLMDefaults())
+	html := strings.Replace(webIndexHTML, "__LOCAL_LLM_DEFAULTS__", string(defaultsJSON), 1)
+	_, _ = io.WriteString(w, html)
+}
+
+func (s *webServer) loadLocalLLMDefaults() localLLMDefaults {
+	path := filepath.Join(s.cwd, "local_llm_config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return localLLMDefaults{}
+	}
+	var defaults localLLMDefaults
+	if err := json.Unmarshal(data, &defaults); err != nil {
+		return localLLMDefaults{}
+	}
+	defaults.BaseURL = strings.TrimSpace(defaults.BaseURL)
+	defaults.Model = strings.TrimSpace(defaults.Model)
+	defaults.APIKey = strings.TrimSpace(defaults.APIKey)
+	return defaults
 }
 
 func (s *webServer) createJob(w http.ResponseWriter, r *http.Request) {
@@ -891,6 +915,10 @@ const webIndexHTML = `<!doctype html>
     let subtitlePath = "";
     let dirty = false;
     outputDir.value = "";
+    const localLlmDefaults = __LOCAL_LLM_DEFAULTS__;
+    llmBaseUrl.value = localLlmDefaults.baseUrl || "";
+    llmModel.value = localLlmDefaults.model || "";
+    llmApiKey.value = localLlmDefaults.apiKey || "";
 
     async function api(path, options) {
       const res = await fetch(path, options);

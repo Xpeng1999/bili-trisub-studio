@@ -172,13 +172,9 @@ def run(video_path: str, cc_srt_path: str = "") -> int:
             python_path = str(SCRIPT_DIR)
             if os.environ.get("PYTHONPATH"):
                 python_path += os.pathsep + os.environ["PYTHONPATH"]
-            env = {
-                **os.environ,
-                "HF_ENDPOINT": "https://hf-mirror.com",
-                "HF_HUB_OFFLINE": "0",
-                "TRANSFORMERS_OFFLINE": "0",
-                "PYTHONPATH": python_path,
-            }
+            env = {**os.environ, "HF_ENDPOINT": "https://hf-mirror.com", "PYTHONPATH": python_path}
+            env.pop("HF_HUB_OFFLINE", None)
+            env.pop("TRANSFORMERS_OFFLINE", None)
             result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             if result.returncode != 0:
                 _log(f"ERROR during transcription:\n{result.stderr[-500:]}")
